@@ -88,12 +88,29 @@ def extract_spatial_data(graph_path):
     print(f"  -> {len(pois) if not pois.empty else 0} POIs found.")
     print(f"  -> {total_weighted} / {len(demand_points)} demand hexagons have at least 1 POI.")
 
-    return candidate_sites, demand_points, demand_weights
+    # -- 5. Electrical substations (grid congestion constraint) ----------------
+    print("Fetching electrical substations from OSM...")
+    try:
+        subs = ox.features_from_bbox(
+            bbox=bbox,
+            tags={"power": ["substation", "sub_station"]}
+        )
+    except Exception as e:
+        print(f"  Warning - substation fetch failed: {e}")
+        subs = gpd.GeoDataFrame()
+
+    substations = []
+    if not subs.empty:
+        sub_centroids = subs.geometry.centroid
+        substations = list(zip(sub_centroids.y, sub_centroids.x))
+    print(f"  -> {len(substations)} substations found.")
+
+    return candidate_sites, demand_points, demand_weights, substations
 
 
 if __name__ == "__main__":
     graph_file = "data/mumbai_network.graphml"
-    candidate_sites, demand_points, demand_weights = extract_spatial_data(graph_file)
+    candidate_sites, demand_points, demand_weights, substations = extract_spatial_data(graph_file)
 
     print("\nSample Candidate Sites (Lat, Lon):")
     for site in candidate_sites[:5]:
@@ -102,3 +119,7 @@ if __name__ == "__main__":
     print("\nSample Demand Points with Weights (index, lat, lon, weight):")
     for i, pt in enumerate(demand_points[:10]):
         print(f"  [{i}]  {pt}  ->  weight={demand_weights[i]}")
+
+    print("\nSubstations (Lat, Lon):")
+    for s in substations:
+        print(f"  {s}")
