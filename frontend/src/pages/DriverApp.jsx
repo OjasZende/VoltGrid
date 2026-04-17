@@ -190,25 +190,10 @@ function TripDetails({ result, origin, destination }) {
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {[
                 {
-                  icon: "⬡",
-                  title: "Max Demand Coverage (MCLP)",
-                  desc: "Selected by the Maximum Coverage Location Problem solver to maximise the number of H3 demand hexagons reachable within a 600-second peak-hour drive radius."
-                },
-                {
-                  icon: "◉",
-                  title: "High POI Density",
-                  desc: "This hex cell has a high count of retail, commercial, and transit POIs — indicating concentrated EV demand from daily commuters and fleet vehicles."
-                },
-                {
                   icon: "⚡",
-                  title: "Grid Proximity",
-                  desc: "Located within proximity of an electrical substation, ensuring stable power supply and reducing grid stress for DC fast charging."
-                },
-                {
-                  icon: "→",
-                  title: "Minimum Detour for Your Trip",
-                  desc: `Of all reachable VoltGrid stations within your current range, this one adds the smallest detour (+${rec.detour_km?.toFixed(1)} km) to your route, calculated using real road distances via OSRM.`
-                },
+                  title: "Optimal Route Match",
+                  desc: `Provides the shortest detour (+${rec.detour_km?.toFixed(1)} km) for your trip, saving time compared to alternative stations.`
+                }
               ].map((item) => (
                 <div key={item.title} style={{ padding: "9px 10px", background: "rgba(15,23,42,0.5)", borderRadius: "6px", border: "1px solid var(--border-color)" }}>
                   <div style={{ fontSize: "0.7rem", fontWeight: "700", color: "#16a34a", marginBottom: "3px" }}>
@@ -281,7 +266,7 @@ export default function DriverApp() {
   const [stations, setStations] = useState([]);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/stations")
+    fetch("/api/stations")
       .then((r) => r.json())
       .then((d) => setStations(d.stations || []));
   }, []);
@@ -292,7 +277,7 @@ export default function DriverApp() {
     setError(null);
     setResult(null);
     try {
-      const resp = await fetch("http://localhost:8000/api/route-check", {
+      const resp = await fetch("/api/route-check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

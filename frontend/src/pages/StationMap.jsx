@@ -69,7 +69,7 @@ export default function StationMap() {
   const center = [19.055, 72.855];
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/spatial-data")
+    fetch("/api/spatial-data")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -81,7 +81,7 @@ export default function StationMap() {
   const runOptimization = () => {
     if (!spatialData) return;
     setOptimizing(true);
-    fetch(`http://localhost:8000/api/optimize?k=${k}`)
+    fetch(`/api/optimize?k=${k}`)
       .then((res) => res.json())
       .then((data) => {
         setOptimizedSites(data.selectedSites || []);

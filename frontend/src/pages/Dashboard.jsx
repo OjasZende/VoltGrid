@@ -1,9 +1,34 @@
 import { useState, useEffect } from "react";
-import { Zap, Car, Leaf, Share2 } from "lucide-react";
+import { Zap, Car, Map as MapIcon, Activity, Battery } from "lucide-react";
+import "./dashboard_new.css";
 
 export default function Dashboard() {
   const [time, setTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }));
-  const [points, setPoints] = useState([]);
+  const [stationCount, setStationCount] = useState("...");
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  // Accurate Data specific to Mumbai EV Market (Dec 2024)
+  const MUMBAI_TOTAL_EVS = "40,958";
+  const MUMBAI_CARS = "12,000+";
+  const MUMBAI_BIKES = "24,000+";
+
+  const slides = [
+    {
+      title: "Maximized Demand Coverage",
+      desc: "VoltGrid's MCLP algorithm ensures chargers are placed precisely in high-demand zones, minimizing range anxiety for over 40,000 registered EVs in Mumbai.",
+      icon: <MapIcon size={48} className="slide-icon" />
+    },
+    {
+      title: "Strategic Grid Placement",
+      desc: "Our neural engine evaluates proximity to commercial POIs and electrical substations to prevent grid stress while aggressively meeting rising charging demands.",
+      icon: <Zap size={48} className="slide-icon" />
+    },
+    {
+      title: "Optimized Driver Routing",
+      desc: "Integrated with OSRM road geometry to provide EV drivers with the absolute minimum detour paths for required charging stops along their route.",
+      icon: <Car size={48} className="slide-icon" />
+    }
+  ];
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -13,136 +38,112 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    // Generate realistic demand points for 24h
-    const newPoints = [];
-    for (let h = 0; h <= 24; h += 2) {
-      const hFactor = 0.5 + 0.5 * Math.sin(Math.PI * (h - 6) / 12);
-      const val = 150 + 400 * hFactor + (Math.random() * 50);
-      newPoints.push({ h: `${h.toString().padStart(2, '0')}:00`, v: val });
-    }
-    setPoints(newPoints);
+    // Fetch actual active station count from backend
+    fetch("/api/stations")
+      .then(res => res.json())
+      .then(data => {
+        if (data.stations) {
+          setStationCount(data.stations.length.toString());
+        }
+      })
+      .catch(err => console.error("Error fetching stations:", err));
   }, []);
 
-  const maxV = 700;
-  const svgW = 800;
-  const svgH = 300;
-
-  const getX = (i) => (i / (points.length - 1)) * svgW;
-  const getY = (v) => svgH - (v / maxV) * svgH;
-
-  const pathData = points.length > 0 ? points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(p.v)}`).join(" ") : "";
-  const areaData = points.length > 0 ? `${pathData} L ${svgW} ${svgH} L 0 ${svgH} Z` : "";
-
-  // Current time position
-  const now = new Date();
-  const currentHourPercent = (now.getHours() * 60 + now.getMinutes()) / (24 * 60);
-  const cursorX = currentHourPercent * svgW;
+  useEffect(() => {
+    // Slideshow auto-rotation
+    const interval = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % slides.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [slides.length]);
 
   return (
-    <div className="dashboard-page">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px' }}>
+    <div className="dashboard-page new-dashboard">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '40px' }}>
         <div className="page-title-group">
-          <h1 className="page-title">GRID OVERVIEW</h1>
-          <p className="page-subtitle">MUMBAI REAL-TIME TELEMETRY</p>
+          <h1 className="page-title">SYSTEM ANALYTICS</h1>
+          <p className="page-subtitle">VOLTGRID PLANNING MODE</p>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '1.8rem', fontWeight: '700', color: 'var(--accent)', fontFamily: 'monospace' }}>{time} IST</div>
-          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: '700', marginTop: '4px' }}>LAST SYNC: JUST NOW</div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: '700', marginTop: '4px' }}>LIVE NETWORK STATUS</div>
         </div>
       </div>
 
-      <div className="dashboard-grid">
-        <div className="stat-card">
-          <div className="stat-label">TOTAL STATIONS</div>
-          <div className="stat-value">500</div>
-          <div className="stat-delta up">↑ +12 this week</div>
-          <Zap className="stat-icon-bg" />
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">EVS COVERED</div>
-          <div className="stat-value">1,00,000</div>
-          <div className="stat-delta up">↑ +4.2% MoM</div>
-          <Car className="stat-icon-bg" />
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">GRID STRESS SAVED</div>
-          <div className="stat-value">34%</div>
-          <div className="stat-delta" style={{ color: 'var(--success)' }}>Optimal Level</div>
-          <Leaf className="stat-icon-bg" />
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">ACTIVE V2C NODES</div>
-          <div className="stat-value">1,240</div>
-          <div className="stat-delta" style={{ color: 'var(--warning)' }}>⚠️ 8 nodes degraded</div>
-          <Share2 className="stat-icon-bg" />
-        </div>
-      </div>
-
-      <div className="chart-container">
-        <div className="chart-card">
-          <div className="chart-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <h3 className="chart-title">TODAY'S DEMAND CURVE</h3>
-            <span style={{ fontSize: '0.6rem', background: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: 'var(--text-muted)' }}>MW/H</span>
+      {/* Hero Slideshow Section */}
+      <div className="slideshow-container">
+        {slides.map((slide, index) => (
+          <div 
+            key={index} 
+            className={`slide ${index === currentSlide ? "active" : ""}`}
+          >
+            <div className="slide-content">
+              <div className="slide-icon-wrapper">{slide.icon}</div>
+              <div className="slide-text">
+                <h2>{slide.title}</h2>
+                <p>{slide.desc}</p>
+              </div>
+            </div>
           </div>
-          <div style={{ position: 'relative', height: `${svgH}px` }}>
-            <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${svgH}`} preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.2" />
-                  <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              {[0, 0.25, 0.5, 0.75, 1].map(p => (
-                <line key={p} x1="0" y1={p * svgH} x2={svgW} y2={p * svgH} stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
-              ))}
-              {points.length > 0 && (
-                <>
-                  <path d={areaData} fill="url(#areaGrad)" />
-                  <path d={pathData} fill="none" stroke="var(--accent)" strokeWidth="2" />
-                  <line x1={cursorX} y1="0" x2={cursorX} y2={svgH} stroke="var(--accent)" strokeWidth="1" />
-                  <circle cx={cursorX} cy={getY(points[Math.floor(currentHourPercent * (points.length / 2)) % points.length]?.v || 300)} r="4" fill="var(--success)" />
-                </>
-              )}
-            </svg>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-              <span>00:00</span>
-              <span>06:00</span>
-              <span>12:00</span>
-              <span>18:00</span>
-              <span>24:00</span>
+        ))}
+        
+        {/* Slideshow Indicators */}
+        <div className="slide-indicators">
+          {slides.map((_, index) => (
+            <div 
+              key={index} 
+              className={`indicator ${index === currentSlide ? "active" : ""}`}
+              onClick={() => setCurrentSlide(index)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Interactive Data Cards */}
+      <div className="interactive-cards-grid">
+        
+        <div className="interactive-card">
+          <div className="card-bg-glow" style={{ background: "radial-gradient(circle at top right, rgba(6, 182, 212, 0.15), transparent 70%)" }}></div>
+          <div className="card-content">
+            <div className="card-header">
+              <Activity size={18} color="var(--accent)" />
+              <span>ACTIVE INFRASTRUCTURE</span>
+            </div>
+            <div className="card-value">{stationCount}</div>
+            <div className="card-subtext">Optimized VoltGrid Nodes Online</div>
+          </div>
+        </div>
+
+        <div className="interactive-card">
+          <div className="card-bg-glow" style={{ background: "radial-gradient(circle at top right, rgba(139, 92, 246, 0.15), transparent 70%)" }}></div>
+          <div className="card-content">
+            <div className="card-header">
+              <Car size={18} color="#8b5cf6" />
+              <span>MUMBAI EV FLEET</span>
+            </div>
+            <div className="card-value" style={{ color: "#8b5cf6" }}>{MUMBAI_TOTAL_EVS}</div>
+            <div className="card-subtext">Total EVs Registered (As of Dec 2024)</div>
+          </div>
+        </div>
+
+        <div className="interactive-card">
+          <div className="card-bg-glow" style={{ background: "radial-gradient(circle at top right, rgba(16, 185, 129, 0.15), transparent 70%)" }}></div>
+          <div className="card-content">
+            <div className="card-header">
+              <Battery size={18} color="#10b981" />
+              <span>FLEET BREAKDOWN</span>
+            </div>
+            <div className="card-value" style={{ fontSize: "1.9rem", color: "#10b981" }}>
+              {MUMBAI_CARS} <span style={{fontSize: "1rem", color: "var(--text-muted)", fontWeight: "normal"}}>Cars</span>
+            </div>
+            <div className="card-subtext" style={{ marginTop: "4px" }}>
+              <strong style={{color: "#fff"}}>{MUMBAI_BIKES}</strong> Two-Wheelers
             </div>
           </div>
         </div>
 
-        <div className="chart-card">
-          <h3 className="chart-title" style={{ marginBottom: '32px' }}>STATION STATUS MIX</h3>
-          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <div style={{ fontSize: '1.5rem', fontWeight: '700' }}>500</div>
-            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Nodes</div>
-          </div>
-          <div className="status-mix-list">
-            {[
-              { label: "Available", val: "45%", color: "var(--success)" },
-              { label: "Busy", val: "30%", color: "var(--warning)" },
-              { label: "Overcrowded", val: "15%", color: "var(--danger)" },
-              { label: "Offline", val: "10%", color: 'var(--text-muted)' },
-            ].map(row => (
-              <div key={row.label} className="status-row">
-                <div className="status-label-group">
-                  <span className="status-dot" style={{ background: row.color }} />
-                  {row.label}
-                </div>
-                <span className="status-pct">{row.val}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-        <div className="live-badge" style={{ background: '#1e293b', border: '1px solid var(--border-color)', padding: '6px 16px' }}>SYSTEM: LIVE</div>
-        <div className="live-badge" style={{ background: '#1e293b', border: '1px solid var(--border-color)', padding: '6px 16px', color: 'var(--accent)' }}>☁ UPTIME: 99.8%</div>
-      </div>
     </div>
   );
 }
