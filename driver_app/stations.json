@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "name": "VoltGrid Station 1",
+    "lat": 19.08565,
+    "lon": 72.8279449
+  },
+  {
+    "id": 2,
+    "name": "VoltGrid Station 2",
+    "lat": 19.0563232,
+    "lon": 72.8287069
+  },
+  {
+    "id": 3,
+    "name": "VoltGrid Station 3",
+    "lat": 19.0763832,
+    "lon": 72.8773575
+  },
+  {
+    "id": 4,
+    "name": "VoltGrid Station 4",
+    "lat": 19.0467822,
+    "lon": 72.8787127
+  },
+  {
+    "id": 5,
+    "name": "VoltGrid Station 5",
+    "lat": 19.0576243,
+    "lon": 72.8477897
+  },
+  {
+    "id": 6,
+    "name": "VoltGrid Station 6",
+    "lat": 19.0436874,
+    "lon": 72.8644537
+  },
+  {
+    "id": 7,
+    "name": "VoltGrid Station 7",
+    "lat": 19.048887472786408,
+    "lon": 72.87329713221347
+  }
+]

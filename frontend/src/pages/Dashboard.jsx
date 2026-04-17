@@ -1,288 +1,147 @@
-import { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Polygon, CircleMarker, Marker, Circle } from 'react-leaflet';
-import { Zap, AlertTriangle } from 'lucide-react';
-import L from 'leaflet';
-
-// Fix for default marker icon in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
-
-// Custom bolt icon for selected stations
-const boltIcon = new L.DivIcon({
-  html: `<div style="background-color: #22c55e; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px rgba(34, 197, 94, 0.5); border: 2px solid white;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-         </div>`,
-  className: 'custom-bolt-icon',
-  iconSize: [24, 24],
-  iconAnchor: [12, 12]
-});
-
-const API_BASE_URL = 'http://localhost:8000';
-const CENTER = [19.0760, 72.8777]; // Mumbai
-const ZOOM = 13;
-const BASEMAP = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+import { useState, useEffect } from "react";
+import { Zap, Car, Leaf, Share2 } from "lucide-react";
 
 export default function Dashboard() {
-  const [data, setData] = useState({
-    candidateSites: [],
-    demandPoints: [],
-    demandWeights: {},
-    hexPolys: [],
-    maxWeight: 1
-  });
-  const [optimization, setOptimization] = useState({
-    selectedSites: [],
-    coveredWeight: 0,
-    totalWeight: 0
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  
-  // Controls
-  const [k, setK] = useState(10);
-  const [showHexagons, setShowHexagons] = useState(true);
-  const [showWeights, setShowWeights] = useState(true);
-  const [activeTab, setActiveTab] = useState('after'); // 'before' or 'after'
+  const [time, setTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }));
+  const [points, setPoints] = useState([]);
 
-  // Load initial spatial data
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/spatial-data`)
-      .then(res => {
-        if (!res.ok) throw new Error(`Server returned ${res.status}`);
-        return res.json();
-      })
-      .then(json => {
-        if (!json.candidateSites) throw new Error("Invalid data format received from API");
-        setData(json);
-        setLoading(false);
-        setError(null);
-      })
-      .catch(err => {
-        console.error("Error loading spatial data:", err);
-        setError("Failed to load map data from backend. Make sure the Python server is running without errors.");
-        setLoading(false);
-      });
+    const timer = setInterval(() => {
+      setTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
+    }, 1000);
+    return () => clearInterval(timer);
   }, []);
 
-  // Run optimization when K changes or after initial load
   useEffect(() => {
-    if (!data.candidateSites || data.candidateSites.length === 0) return;
-    
-    setLoading(true);
-    fetch(`${API_BASE_URL}/api/optimize?k=${k}`)
-      .then(res => {
-        if (!res.ok) throw new Error(`Optimization failed with status ${res.status}`);
-        return res.json();
-      })
-      .then(json => {
-        if (!json.selectedSites) throw new Error("Invalid optimization format from API");
-        setOptimization(json);
-        setLoading(false);
-        setError(null);
-      })
-      .catch(err => {
-        console.error("Error optimizing:", err);
-        setError("Failed to run optimization algorithm. Please check backend logs.");
-        setLoading(false);
-      });
-  }, [k, data.candidateSites]);
+    // Generate realistic demand points for 24h
+    const newPoints = [];
+    for (let h = 0; h <= 24; h += 2) {
+      const hFactor = 0.5 + 0.5 * Math.sin(Math.PI * (h - 6) / 12);
+      const val = 150 + 400 * hFactor + (Math.random() * 50);
+      newPoints.push({ h: `${h.toString().padStart(2, '0')}:00`, v: val });
+    }
+    setPoints(newPoints);
+  }, []);
 
-  const weightToColor = (weight, maxWeight) => {
-    if (!maxWeight || maxWeight === 0 || !weight || weight === 0) return { color: "#334155", opacity: 0.1 };
-    const ratio = Math.min(weight / maxWeight, 1.0);
-    // Interpolate from light yellow -> deep orange/red
-    const r = 255;
-    const g = Math.floor(200 - ratio * 160);
-    const b = Math.floor(50 - ratio * 50);
-    return { 
-      color: `rgb(${r}, ${g}, ${b})`, 
-      opacity: 0.15 + ratio * 0.5 
-    };
-  };
+  const maxV = 700;
+  const svgW = 800;
+  const svgH = 300;
 
-  const selectedSet = useMemo(() => {
-    const sites = optimization.selectedSites || [];
-    return new Set(sites.map(s => `${s[0]},${s[1]}`));
-  }, [optimization.selectedSites]);
+  const getX = (i) => (i / (points.length - 1)) * svgW;
+  const getY = (v) => svgH - (v / maxV) * svgH;
+
+  const pathData = points.length > 0 ? points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(p.v)}`).join(" ") : "";
+  const areaData = points.length > 0 ? `${pathData} L ${svgW} ${svgH} L 0 ${svgH} Z` : "";
+
+  // Current time position
+  const now = new Date();
+  const currentHourPercent = (now.getHours() * 60 + now.getMinutes()) / (24 * 60);
+  const cursorX = currentHourPercent * svgW;
 
   return (
-    <div className="dashboard-container">
-      {loading && !error && (
-        <div className="loading-overlay">
-          <div className="spinner"></div>
-          <p>Processing Spatial Data...</p>
+    <div className="dashboard-page">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px' }}>
+        <div className="page-title-group">
+          <h1 className="page-title">GRID OVERVIEW</h1>
+          <p className="page-subtitle">MUMBAI REAL-TIME TELEMETRY</p>
         </div>
-      )}
-
-      {error && (
-        <div className="loading-overlay" style={{ background: "rgba(15, 23, 42, 0.95)" }}>
-          <AlertTriangle size={48} color="#ef4444" style={{ marginBottom: "16px" }} />
-          <h2 style={{ color: "#ef4444", marginBottom: "8px" }}>Connection Error</h2>
-          <p style={{ maxWidth: "400px", textAlign: "center", color: "#f8fafc" }}>{error}</p>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '1.8rem', fontWeight: '700', color: 'var(--accent)', fontFamily: 'monospace' }}>{time} IST</div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: '700', marginTop: '4px' }}>LAST SYNC: JUST NOW</div>
         </div>
-      )}
+      </div>
 
-      {/* Sidebar Controls */}
-      <div className="sidebar">
-        <div className="sidebar-header">
-          <h1 className="sidebar-title"><Zap size={24} /> VoltGrid</h1>
-          <p className="sidebar-subtitle">Mumbai EV Station Optimizer</p>
+      <div className="dashboard-grid">
+        <div className="stat-card">
+          <div className="stat-label">TOTAL STATIONS</div>
+          <div className="stat-value">500</div>
+          <div className="stat-delta up">↑ +12 this week</div>
+          <Zap className="stat-icon-bg" />
         </div>
-
-        <div className="control-group">
-          <label className="control-label">Station Budget (K)</label>
-          <div className="slider-container">
-            <input 
-              type="range" 
-              min="1" 
-              max="30" 
-              value={k} 
-              onChange={(e) => setK(parseInt(e.target.value))}
-              disabled={!!error || (data.candidateSites && data.candidateSites.length === 0)}
-            />
-            <span className="slider-value">{k}</span>
-          </div>
+        <div className="stat-card">
+          <div className="stat-label">EVS COVERED</div>
+          <div className="stat-value">1,00,000</div>
+          <div className="stat-delta up">↑ +4.2% MoM</div>
+          <Car className="stat-icon-bg" />
         </div>
-
-        <div className="control-group">
-          <label className="control-label">Map Layers</label>
-          <label className="toggle-container">
-            <input 
-              type="checkbox" 
-              checked={showHexagons} 
-              onChange={(e) => setShowHexagons(e.target.checked)} 
-            />
-            Show Demand Grid (H3 Hexagons)
-          </label>
-          <label className="toggle-container">
-            <input 
-              type="checkbox" 
-              checked={showWeights} 
-              onChange={(e) => setShowWeights(e.target.checked)} 
-              disabled={!showHexagons}
-            />
-            Color hexagons by POI weight
-          </label>
+        <div className="stat-card">
+          <div className="stat-label">GRID STRESS SAVED</div>
+          <div className="stat-value">34%</div>
+          <div className="stat-delta" style={{ color: 'var(--success)' }}>Optimal Level</div>
+          <Leaf className="stat-icon-bg" />
         </div>
-
-        <div className="legend">
-          <div className="legend-title">Legend</div>
-          <div className="legend-item">
-            <div className="legend-color" style={{ backgroundColor: "#ef4444" }}></div>
-            <span>Existing Site (Unoptimised)</span>
-          </div>
-          <div className="legend-item">
-            <div className="legend-color" style={{ backgroundColor: "#22c55e", border: "1px solid white" }}></div>
-            <span>Selected MCLP Station</span>
-          </div>
-          <div className="legend-item">
-            <div className="legend-color" style={{ backgroundColor: "#64748b" }}></div>
-            <span>Unselected Candidate</span>
-          </div>
+        <div className="stat-card">
+          <div className="stat-label">ACTIVE V2C NODES</div>
+          <div className="stat-value">1,240</div>
+          <div className="stat-delta" style={{ color: 'var(--warning)' }}>⚠️ 8 nodes degraded</div>
+          <Share2 className="stat-icon-bg" />
         </div>
+      </div>
 
-        <div className="metrics-container">
-          <div className="metric-card">
-            <div className="metric-value">{(data.demandPoints || []).length}</div>
-            <div className="metric-label">H3 Demand Points</div>
+      <div className="chart-container">
+        <div className="chart-card">
+          <div className="chart-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <h3 className="chart-title">TODAY'S DEMAND CURVE</h3>
+            <span style={{ fontSize: '0.6rem', background: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: 'var(--text-muted)' }}>MW/H</span>
           </div>
-          <div className="metric-card">
-            <div className="metric-value">{(data.candidateSites || []).length}</div>
-            <div className="metric-label">Candidate Sites</div>
-          </div>
-          <div className="metric-card" style={{ gridColumn: "span 2" }}>
-            <div className="metric-value success">
-              {optimization.totalWeight ? `${((optimization.coveredWeight / optimization.totalWeight) * 100).toFixed(1)}%` : '0%'}
+          <div style={{ position: 'relative', height: `${svgH}px` }}>
+            <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${svgH}`} preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.2" />
+                  <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {[0, 0.25, 0.5, 0.75, 1].map(p => (
+                <line key={p} x1="0" y1={p * svgH} x2={svgW} y2={p * svgH} stroke="rgba(255,255,255,0.05)" strokeDasharray="4 4" />
+              ))}
+              {points.length > 0 && (
+                <>
+                  <path d={areaData} fill="url(#areaGrad)" />
+                  <path d={pathData} fill="none" stroke="var(--accent)" strokeWidth="2" />
+                  <line x1={cursorX} y1="0" x2={cursorX} y2={svgH} stroke="var(--accent)" strokeWidth="1" />
+                  <circle cx={cursorX} cy={getY(points[Math.floor(currentHourPercent * (points.length / 2)) % points.length]?.v || 300)} r="4" fill="var(--success)" />
+                </>
+              )}
+            </svg>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+              <span>00:00</span>
+              <span>06:00</span>
+              <span>12:00</span>
+              <span>18:00</span>
+              <span>24:00</span>
             </div>
-            <div className="metric-label">POI Weight Covered ({optimization.coveredWeight || 0} / {optimization.totalWeight || 0})</div>
+          </div>
+        </div>
+
+        <div className="chart-card">
+          <h3 className="chart-title" style={{ marginBottom: '32px' }}>STATION STATUS MIX</h3>
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div style={{ fontSize: '1.5rem', fontWeight: '700' }}>500</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Nodes</div>
+          </div>
+          <div className="status-mix-list">
+            {[
+              { label: "Available", val: "45%", color: "var(--success)" },
+              { label: "Busy", val: "30%", color: "var(--warning)" },
+              { label: "Overcrowded", val: "15%", color: "var(--danger)" },
+              { label: "Offline", val: "10%", color: 'var(--text-muted)' },
+            ].map(row => (
+              <div key={row.label} className="status-row">
+                <div className="status-label-group">
+                  <span className="status-dot" style={{ background: row.color }} />
+                  {row.label}
+                </div>
+                <span className="status-pct">{row.val}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Main Map Content */}
-      <div className="main-content">
-        <div className="tabs">
-          <button 
-            className={`tab ${activeTab === 'before' ? 'active' : ''}`}
-            onClick={() => setActiveTab('before')}
-          >
-            🔴 Before (All Sites)
-          </button>
-          <button 
-            className={`tab ${activeTab === 'after' ? 'active' : ''}`}
-            onClick={() => setActiveTab('after')}
-          >
-            🟢 After (Optimized)
-          </button>
-        </div>
-
-        <div className="map-container">
-          <MapContainer center={CENTER} zoom={ZOOM} zoomControl={false} style={{ height: '100%', width: '100%' }}>
-            <TileLayer
-              url={BASEMAP}
-              attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
-            />
-            
-            {/* Hexagon Grid */}
-            {showHexagons && (data.hexPolys || []).map((poly, idx) => {
-              const weight = (data.demandWeights && data.demandWeights[idx]) ? data.demandWeights[idx] : 0;
-              const { color, opacity } = showWeights ? weightToColor(weight, data.maxWeight) : { color: "#64748b", opacity: 0.15 };
-              return (
-                <Polygon 
-                  key={`hex-${idx}`}
-                  positions={poly}
-                  pathOptions={{
-                    color: "#475569",
-                    weight: 0.5,
-                    fillColor: color,
-                    fillOpacity: opacity
-                  }}
-                />
-              );
-            })}
-
-            {/* Before Tab: Show all existing sites in red */}
-            {activeTab === 'before' && (data.candidateSites || []).map((site, idx) => (
-              <CircleMarker 
-                key={`site-before-${idx}`}
-                center={site}
-                radius={7}
-                pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.8 }}
-              />
-            ))}
-
-            {/* After Tab: Show optimized sites and dimmed unselected ones */}
-            {activeTab === 'after' && (data.candidateSites || []).map((site, idx) => {
-              const isSelected = selectedSet.has(`${site[0]},${site[1]}`);
-              
-              if (isSelected) {
-                return (
-                  <div key={`sel-${idx}`}>
-                    <Marker position={site} icon={boltIcon} />
-                    <Circle 
-                      center={site}
-                      radius={2000} // Assuming 2000m radius as in original
-                      pathOptions={{ color: '#22c55e', weight: 1.5, fillColor: '#22c55e', fillOpacity: 0.08 }}
-                    />
-                  </div>
-                );
-              } else {
-                return (
-                  <CircleMarker 
-                    key={`cand-${idx}`}
-                    center={site}
-                    radius={4}
-                    pathOptions={{ color: '#64748b', fillColor: '#94a3b8', fillOpacity: 0.4 }}
-                  />
-                );
-              }
-            })}
-          </MapContainer>
-        </div>
+      <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+        <div className="live-badge" style={{ background: '#1e293b', border: '1px solid var(--border-color)', padding: '6px 16px' }}>SYSTEM: LIVE</div>
+        <div className="live-badge" style={{ background: '#1e293b', border: '1px solid var(--border-color)', padding: '6px 16px', color: 'var(--accent)' }}>☁ UPTIME: 99.8%</div>
       </div>
     </div>
   );

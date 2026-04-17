@@ -7,9 +7,13 @@ from pydantic import BaseModel
 
 # Add backend/algo to path so local imports work
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend", "algo"))
+# Add driver_app to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "driver_app"))
+
 from extraction_script import extract_spatial_data
 from distance_matrix import calculate_distance_matrix
 from set_cover_optimizer import solve_mclp
+from route_feasibility import check_feasibility
 
 app = FastAPI(title="VoltGrid API")
 
@@ -107,6 +111,69 @@ def run_optimization(k: int = Query(10, ge=1, le=50)):
         "coveredWeight": covered_weight,
         "totalWeight": total_weight
     }
+
+# ── Driver App endpoints ────────────────────────────────────────────────────
+
+class RouteCheckRequest(BaseModel):
+    battery_pct: float          # 0-100
+    vehicle_range_km: float     # total range at 100%
+    origin: str                 # free-text address or "lat,lon"
+    destination: str            # free-text address or "lat,lon"
+    strategy: str = "full"      # "full" or "min"
+
+@app.post("/api/route-check")
+def route_check(req: RouteCheckRequest):
+    """
+    Check if an EV can reach its destination on current battery.
+    Returns feasibility result + geocoded coords + OSRM road geometry for map display.
+    """
+    from route_feasibility import _geocode, _osrm_route_geometry
+    import time as _time
+
+    result = check_feasibility(
+        user_battery_pct=req.battery_pct,
+        vehicle_range=req.vehicle_range_km,
+        origin_address=req.origin,
+        destination_address=req.destination,
+        strategy=req.strategy,
+    )
+
+    # Geocode both ends
+    try:
+        orig_lat, orig_lon = _geocode(req.origin)
+        _time.sleep(1)
+        dest_lat, dest_lon = _geocode(req.destination)
+        result["origin_coords"] = [orig_lat, orig_lon]
+        result["dest_coords"] = [dest_lat, dest_lon]
+
+        # Fetch actual OSRM road geometry for drawing on map
+        if result.get("feasible"):
+            # Direct route
+            geom = _osrm_route_geometry(orig_lat, orig_lon, dest_lat, dest_lon)
+            result["route_geometry"] = geom
+        elif result.get("recommendation") and result["recommendation"].get("station"):
+            s = result["recommendation"]["station"]
+            # Leg 1: Origin -> Station
+            leg1 = _osrm_route_geometry(orig_lat, orig_lon, s["lat"], s["lon"])
+            # Leg 2: Station -> Destination
+            leg2 = _osrm_route_geometry(s["lat"], s["lon"], dest_lat, dest_lon)
+            result["leg1_geometry"] = leg1
+            result["leg2_geometry"] = leg2
+
+    except Exception as e:
+        print(f"Geometry fetch error: {e}")
+
+    return result
+
+@app.get("/api/stations")
+def get_stations():
+    """Returns the pre-computed VoltGrid station list from stations.json."""
+    import json
+    stations_file = os.path.join(os.path.dirname(__file__), "driver_app", "stations.json")
+    if not os.path.exists(stations_file):
+        return {"stations": [], "error": "stations.json not found. Run: python driver_app/generate_stations.py"}
+    with open(stations_file) as f:
+        return {"stations": json.load(f)}
 
 if __name__ == "__main__":
     import uvicorn
