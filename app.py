@@ -45,7 +45,8 @@ def load_spatial_data():
         return  # Already loaded
 
     print("Loading spatial data and calculating distance matrix...")
-    candidate_sites, demand_points, demand_weights, substations = extract_spatial_data(GRAPH_FILE)
+    # Base load (use_ai=False to get raw POIs initially, but we'll re-run as needed)
+    candidate_sites, demand_points, demand_weights, substations = extract_spatial_data(GRAPH_FILE, use_ai=False)
     reachability = calculate_distance_matrix(GRAPH_FILE, demand_points, candidate_sites)
 
     # Pre-build hex boundary polygons for the map layer
@@ -73,43 +74,75 @@ async def startup_event():
     load_spatial_data()
 
 @app.get("/api/spatial-data")
-def get_spatial_data():
-    """Returns candidate sites, hex boundaries, and weights."""
+def get_spatial_data(use_ai: bool = Query(True)):
+    """Returns candidate sites, hex boundaries, and weights (AI-adjusted if use_ai=True)."""
+    weights = global_demand_weights
+    if use_ai:
+        # Re-run extraction with AI enabled
+        # In a real app we'd cache this, but for the demo we'll just call it
+        _, _, weights, _ = extract_spatial_data(GRAPH_FILE, use_ai=True)
+    
+    max_w = max(weights.values()) if weights else 1
+    
+    # Baseline comparison (POI-only) for the UI stats
+    _, _, base_weights, _ = extract_spatial_data(GRAPH_FILE, use_ai=False)
+    base_total = sum(base_weights.values())
+
     return {
         "candidateSites": global_candidate_sites,
         "demandPoints": global_demand_points,
-        "demandWeights": global_demand_weights,
+        "demandWeights": weights,
         "hexPolys": global_hex_polys,
-        "maxWeight": global_max_w
+        "maxWeight": max_w,
+        "baseTotalWeight": base_total,
+        "is_ai": use_ai
     }
 
 @app.get("/api/optimize")
-def run_optimization(k: int = Query(10, ge=1, le=50)):
-    """Runs the MCLP optimization with the given budget K."""
+def run_optimization(k: int = Query(10, ge=1, le=50), use_ai: bool = Query(True)):
+    """Runs the MCLP optimization with the given budget K and AI toggle."""
+    weights = global_demand_weights
+    if use_ai:
+        _, _, weights, _ = extract_spatial_data(GRAPH_FILE, use_ai=True)
+
     selected_sites = solve_mclp(
         global_candidate_sites,
         global_demand_points,
-        global_demand_weights,
+        weights,
         global_reachability,
         K=k,
         substations=global_substations
     )
 
-    # Calculate covered weight
+    # Calculate metrics
     selected_set = set(map(tuple, selected_sites))
-    total_weight = sum(global_demand_weights.values())
+    total_weight = sum(weights.values())
     
     covered_weight = sum(
-        global_demand_weights.get(i, 0)
+        weights.get(i, 0)
         for i, site in enumerate(global_demand_points)
         if global_reachability.get(i, []) and
            any(tuple(global_candidate_sites[j]) in selected_set for j in global_reachability.get(i, []))
     )
 
+    # Baseline comparison (POI-only) for the UI stats
+    # We'll return this to show "AI Boost" in the React UI
+    _, _, base_weights, _ = extract_spatial_data(GRAPH_FILE, use_ai=False)
+    base_total = sum(base_weights.values())
+    
+    # Dead zone count (demand > 10 and not covered)
+    dead_zones = sum(1 for i, w in weights.items() if w > 10 and not (
+        global_reachability.get(i, []) and
+        any(tuple(global_candidate_sites[j]) in selected_set for j in global_reachability.get(i, []))
+    ))
+
     return {
         "selectedSites": selected_sites,
         "coveredWeight": covered_weight,
-        "totalWeight": total_weight
+        "totalWeight": total_weight,
+        "deadZones": dead_zones,
+        "baseTotalWeight": base_total,
+        "is_ai": use_ai
     }
 
 # ── Driver App endpoints ────────────────────────────────────────────────────
@@ -120,6 +153,7 @@ class RouteCheckRequest(BaseModel):
     origin: str                 # free-text address or "lat,lon"
     destination: str            # free-text address or "lat,lon"
     strategy: str = "full"      # "full" or "min"
+    use_ai: bool = True         # Toggle AI queue prediction
 
 @app.post("/api/route-check")
 def route_check(req: RouteCheckRequest):
@@ -130,12 +164,18 @@ def route_check(req: RouteCheckRequest):
     from route_feasibility import _geocode, _osrm_route_geometry
     import time as _time
 
+    # Step 0: Get the active station network for this request
+    stations_data = get_stations(use_ai=req.use_ai)
+    stations_list = stations_data.get("stations", [])
+
     result = check_feasibility(
         user_battery_pct=req.battery_pct,
         vehicle_range=req.vehicle_range_km,
         origin_address=req.origin,
         destination_address=req.destination,
         strategy=req.strategy,
+        use_ai=req.use_ai,
+        stations=stations_list,
     )
 
     # Geocode both ends
@@ -166,14 +206,49 @@ def route_check(req: RouteCheckRequest):
     return result
 
 @app.get("/api/stations")
-def get_stations():
-    """Returns the pre-computed VoltGrid station list from stations.json."""
-    import json
-    stations_file = os.path.join(os.path.dirname(__file__), "driver_app", "stations.json")
-    if not os.path.exists(stations_file):
-        return {"stations": [], "error": "stations.json not found. Run: python driver_app/generate_stations.py"}
-    with open(stations_file) as f:
-        return {"stations": json.load(f)}
+def get_stations(use_ai: bool = Query(True), k: int = Query(15)):
+    """
+    Returns the VoltGrid station list.
+    If use_ai/k are provided, it runs a live optimization to show the AI-optimized network.
+    """
+    try:
+        # Re-run optimization to get the "active" network for the driver
+        # Use the cached spatial data from app startup
+        weights = global_demand_weights
+        if use_ai:
+            _, _, weights, _ = extract_spatial_data(GRAPH_FILE, use_ai=True)
+
+        selected_sites = solve_mclp(
+            global_candidate_sites,
+            global_demand_points,
+            weights,
+            global_reachability,
+            K=k,
+            substations=global_substations
+        )
+        
+        # Convert to the list format expected by Driver App
+        stations = []
+        for i, site in enumerate(selected_sites):
+            stations.append({
+                "id": i + 1,
+                "name": f"VoltGrid Node {i+1}",
+                "lat": site[0],
+                "lon": site[1],
+                "type": "DC Fast",
+                "status": "online"
+            })
+        return {"stations": stations, "is_ai": use_ai}
+
+    except Exception as e:
+        print(f"Dynamic stations error: {e}")
+        # Fallback to static stations.json if optimization fails
+        import json
+        stations_file = os.path.join(os.path.dirname(__file__), "driver_app", "stations.json")
+        if not os.path.exists(stations_file):
+            return {"stations": [], "error": "stations.json not found."}
+        with open(stations_file) as f:
+            return {"stations": json.load(f)}
 
 if __name__ == "__main__":
     import uvicorn

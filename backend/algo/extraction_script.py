@@ -3,7 +3,14 @@ import h3
 import geopandas as gpd
 from shapely.geometry import Polygon
 from collections import defaultdict
+import sys
+import datetime
+import pandas as pd
+import os
 
+# Add src to path to import ml
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(BASE_DIR)
 # OSM tags used to identify Points of Interest that generate EV charging demand
 POI_TAGS = {
     'landuse':        ['retail', 'commercial'],
@@ -12,7 +19,10 @@ POI_TAGS = {
     'railway':        ['station', 'halt', 'tram_stop'],
 }
 
-def extract_spatial_data(graph_path):
+# ML Toggle
+DEFAULT_USE_AI = True
+
+def extract_spatial_data(graph_path, use_ai=DEFAULT_USE_AI):
     """
     Load the road graph, extract candidate sites (parking/fuel) and H3
     demand points, then weight each demand point by the number of nearby
@@ -83,6 +93,43 @@ def extract_spatial_data(graph_path):
         cell_to_idx[c]: poi_counts.get(c, 0)
         for c in cell_list
     }
+
+    # ML: demand prediction
+    if use_ai:
+        try:
+            from src.ml.predict import predict_demand
+            print("  Applying ML Demand Prediction to zones...")
+            
+            # Prepare dataframe for prediction
+            current_hour = datetime.datetime.now().hour
+            current_day = datetime.datetime.now().weekday()
+            
+            # Create synthetic feature values based on the schema
+            # hour, day_of_week, traffic_score, parking_density, grid_capacity, existing_station_count, ev_registrations
+            records = []
+            for i, cell in enumerate(cell_list):
+                poi_c = poi_counts.get(cell, 0)
+                records.append({
+                    'hour': current_hour,
+                    'day_of_week': current_day,
+                    'traffic_score': min(100, poi_c * 10),       # proxy
+                    'parking_density': min(1.0, poi_c * 0.1),    # proxy
+                    'grid_capacity': 250,                        # static proxy
+                    'existing_station_count': 1,                 # static proxy
+                    'ev_registrations': 40000                    # static proxy
+                })
+                
+            df = pd.DataFrame(records)
+            predicted_scores = predict_demand(df)
+            
+            # Replace raw demand weights with ML predicted scores
+            for i, score in enumerate(predicted_scores):
+                # Ensure it's a positive float or int
+                demand_weights[i] = max(0.0, float(score))
+                
+            print(f"  -> ML predictions successfully applied to {len(demand_weights)} zones.")
+        except Exception as e:
+            print(f"  Warning: ML Demand Prediction failed ({e}). Falling back to raw POI weights.")
 
     total_weighted = sum(1 for w in demand_weights.values() if w > 0)
     print(f"  -> {len(pois) if not pois.empty else 0} POIs found.")

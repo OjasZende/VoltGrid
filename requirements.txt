@@ -7,3 +7,6 @@ networkx
 streamlit
 folium
 streamlit-folium
+xgboost
+pandas
+scikit-learn

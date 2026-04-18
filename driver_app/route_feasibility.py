@@ -36,7 +36,14 @@ import os
 import time
 import argparse
 import requests
+import datetime
+import pandas as pd
 from pathlib import Path
+import sys
+
+# Add src to path to import ml
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -319,6 +326,8 @@ def check_feasibility(
     destination_address: str,
     origin_address: str = MUMBAI_DEFAULT_ORIGIN,
     strategy: str = "full",      # "full" or "min"
+    use_ai: bool = True,         # Toggle AI queue prediction
+    stations: list = None,       # Optional custom station list
     api_key: str = "",           # kept for backwards-compat; not used
 ) -> dict:
     """
@@ -387,14 +396,18 @@ def check_feasibility(
     # Step 5: Re-routing — find VoltGrid station with smallest detour
     # Only stations the driver can actually REACH with current range are considered.
     print("\nInsufficient range. Evaluating VoltGrid stations for best detour ...")
-    stations = _load_stations()
+    stations_to_check = stations if stations is not None else _load_stations()
 
     best_station       = None
     best_total_km      = float("inf")
+    best_total_time    = float("inf")
     best_detour_km     = float("inf")
     skipped_too_far    = 0
+    
+    current_hour = datetime.datetime.now().hour
+    current_day = datetime.datetime.now().weekday()
 
-    for station in stations:
+    for station in stations_to_check:
         s_lat, s_lon = station["lat"], station["lon"]
         try:
             user_to_station = _osrm_distance_km(orig_lat, orig_lon, s_lat, s_lon)
@@ -421,15 +434,44 @@ def check_feasibility(
 
             total_km  = user_to_station + station_to_dest
             detour_km = total_km - dest_distance
+            
+            # ML: queue prediction
+            predicted_queue = 0
+            if use_ai:
+                try:
+                    from src.ml.predict import predict_queue
+
+                    # Mock features based on schema
+                    df = pd.DataFrame([{
+                        'hour': current_hour,
+                        'day_of_week': current_day,
+                        'nearby_demand_score': 60,  # proxy
+                        'total_ports': 4,
+                        'fast_charger_ports': 2,
+                        'historical_sessions': 100
+                    }])
+
+                    predicted_queue = max(0, float(predict_queue(df)[0]))
+
+                except Exception as e:
+                    # print(f"ML Queue Prediction failed: {e}")
+                    predicted_queue = 0
+                
+            # Assume average driving speed of 30 km/h in Mumbai = 2 mins per km
+            driving_time_mins = total_km * 2
+            total_trip_time = driving_time_mins + predicted_queue
 
             print(f"  {station['name']:<25} : "
                   f"{user_to_station:.1f} + {station_to_dest:.1f} "
-                  f"= {total_km:.1f} km  (detour +{detour_km:.1f} km)  [REACHABLE]")
+                  f"= {total_km:.1f} km (detour +{detour_km:.1f} km) "
+                  f"| Queue: {predicted_queue:.0f}m | Total Time: {total_trip_time:.0f}m [REACHABLE]")
 
-            if total_km < best_total_km:
+            if total_trip_time < best_total_time:
+                best_total_time = total_trip_time
                 best_total_km  = total_km
                 best_detour_km = detour_km
                 best_station   = station
+                best_station['_predicted_queue'] = predicted_queue
 
         except Exception as e:
             print(f"  Warning: could not route via {station['name']}: {e}")
@@ -476,13 +518,17 @@ def check_feasibility(
     # 4. Convert range -> kWh -> Time
     # Efficiency (km/kWh)
     efficiency = vehicle_range / DEFAULT_BATTERY_KWH
+    import math
     kwh_needed = range_to_add / efficiency
-    charging_time_mins = (kwh_needed / CHARGING_SPEED_KW) * 60
+    charging_time_mins = math.ceil((kwh_needed / CHARGING_SPEED_KW) * 60)
 
+    predicted_queue = max(0, best_station.get('_predicted_queue', 0))
+    
     msg = (
         f"Insufficient range. Recommendation: Stop at {best_station['name']}. "
         f"It is {_osrm_distance_km(orig_lat, orig_lon, best_station['lat'], best_station['lon']):.1f} km "
         f"away (within your {available_range:.1f} km range). "
+        f"Expected queue is ~{predicted_queue:.0f} mins. "
         f"Charging ({strategy}) for ~{charging_time_mins:.0f} mins will allow you to complete "
         f"the remaining {station_to_dest:.1f} km of your trip."
     )
@@ -496,6 +542,7 @@ def check_feasibility(
             station=best_station,
             total_km=best_total_km,
             detour_km=best_detour_km,
+            queue_mins=best_station.get('_predicted_queue', 0),
             charging_time_mins=charging_time_mins,
             strategy=strategy
         ),
