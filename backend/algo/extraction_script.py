@@ -7,6 +7,12 @@ import sys
 import datetime
 import pandas as pd
 import os
+try:
+    from spatial_config import BOUNDS, H3_RESOLUTION
+    USE_CONFIG_BOUNDS = True
+except ImportError:
+    USE_CONFIG_BOUNDS = False
+    H3_RESOLUTION = 9
 
 # Add src to path to import ml
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,25 +28,26 @@ POI_TAGS = {
 # ML Toggle
 DEFAULT_USE_AI = True
 
-def extract_spatial_data(graph_path, use_ai=DEFAULT_USE_AI):
+def extract_spatial_data(graph_or_path, use_ai=DEFAULT_USE_AI):
     """
-    Load the road graph, extract candidate sites (parking/fuel) and H3
-    demand points, then weight each demand point by the number of nearby
-    POIs (retail, commercial, transit) that fall inside its hexagon.
-
-    Returns
-    -------
-    candidate_sites : list of (lat, lon)
-    demand_points   : list of (lat, lon)   — hex centres, res-9
-    demand_weights  : dict  {demand_index: int}  — POI count per hex
+    ... (docstring) ...
     """
-    print(f"Loading graph from {graph_path}...")
-    G = ox.load_graphml(graph_path)
+    if isinstance(graph_or_path, str):
+        print(f"Loading graph from {graph_or_path}...")
+        G = ox.load_graphml(graph_or_path)
+    else:
+        G = graph_or_path
 
     gdf_nodes, _ = ox.graph_to_gdfs(G)
     west, south, east, north = gdf_nodes.total_bounds
+    
+    if USE_CONFIG_BOUNDS:
+        west, south, east, north = BOUNDS
+        print(f"Using Greater Mumbai Bounds: N={north:.5f} S={south:.5f} E={east:.5f} W={west:.5f}")
+    else:
+        print(f"Graph bounds: N={north:.5f}  S={south:.5f}  E={east:.5f}  W={west:.5f}")
+    
     bbox = (west, south, east, north)   # (left, bottom, right, top) for OSMnx 2.x
-    print(f"Graph bounds: N={north:.5f}  S={south:.5f}  E={east:.5f}  W={west:.5f}")
 
     # ── 1. Candidate sites: parking & fuel amenities ──────────────────────────
     print("Fetching candidate sites (parking / fuel) from OSM...")
@@ -60,8 +67,8 @@ def extract_spatial_data(graph_path, use_ai=DEFAULT_USE_AI):
     bbox_poly   = Polygon([(west, south), (east, south), (east, north), (west, north)])
     poly_coords = [(lat, lon) for lon, lat in bbox_poly.exterior.coords]
 
-    print("Generating H3 demand points at resolution 9...")
-    cells = h3.polygon_to_cells(h3.LatLngPoly(poly_coords), res=9)
+    print(f"Generating H3 demand points at resolution {H3_RESOLUTION}...")
+    cells = h3.polygon_to_cells(h3.LatLngPoly(poly_coords), res=H3_RESOLUTION)
     # Map cell id → demand index (stable ordering)
     cell_list    = list(cells)
     demand_points = [h3.cell_to_latlng(c) for c in cell_list]
@@ -85,7 +92,7 @@ def extract_spatial_data(graph_path, use_ai=DEFAULT_USE_AI):
         for geom in poi_centroids:
             if geom is None or geom.is_empty:
                 continue
-            cell = h3.latlng_to_cell(geom.y, geom.x, 9)
+            cell = h3.latlng_to_cell(geom.y, geom.x, H3_RESOLUTION)
             poi_counts[cell] += 1
 
     # Build demand_weights for every demand hex (default = 0 if no POIs)

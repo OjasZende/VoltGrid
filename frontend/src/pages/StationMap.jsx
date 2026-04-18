@@ -69,7 +69,8 @@ export default function StationMap() {
   const [deadZones, setDeadZones] = useState(0);
   const [loadError, setLoadError] = useState(null);
 
-  const center = [19.055, 72.855];
+  const center = [19.10, 72.88];
+  const zoom = 11;
 
   useEffect(() => {
     fetch(`/api/spatial-data?use_ai=${useAI}`)
@@ -273,7 +274,7 @@ export default function StationMap() {
       <div style={{ flex: 1, display: "flex" }}>
         <MapContainer
           center={center}
-          zoom={13}
+          zoom={zoom}
           style={{ flex: 1, height: "100%" }}
         >
           <ChangeView center={center} />

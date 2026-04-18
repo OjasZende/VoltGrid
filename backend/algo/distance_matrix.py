@@ -109,32 +109,20 @@ def _add_travel_time_weights(G, peak_multiplier: float = PEAK_HOUR_MULTIPLIER):
 
 
 def calculate_distance_matrix(
-    graph_path,
+    graph_or_path,
     demand_points,
     candidate_sites,
     peak_multiplier: float = PEAK_HOUR_MULTIPLIER,
     cutoff_seconds: float  = TRAVEL_TIME_CUTOFF_SECONDS,
 ):
     """
-    Build a reachability map using travel-time Dijkstra.
-
-    For every demand point, find all candidate sites reachable within
-    `cutoff_seconds` of peak-hour driving time (OSM maxspeed × 0.5).
-
-    Parameters
-    ----------
-    graph_path      : str   — path to the .graphml road network file
-    demand_points   : list of (lat, lon)
-    candidate_sites : list of (lat, lon)
-    peak_multiplier : float — speed reduction factor (default 0.5 = peak hour)
-    cutoff_seconds  : float — max travel time in seconds (default 600 = 10 min)
-
-    Returns
-    -------
-    reachability_map : dict {demand_index: [candidate_indices]}
+    ... (docstring) ...
     """
-    print(f"Loading graph from {graph_path}...")
-    G = ox.load_graphml(graph_path)
+    if isinstance(graph_or_path, str):
+        print(f"Loading graph from {graph_or_path}...")
+        G = ox.load_graphml(graph_or_path)
+    else:
+        G = graph_or_path
 
     print(f"Computing peak-hour travel times  "
           f"(speed multiplier={peak_multiplier}, cutoff={cutoff_seconds}s)...")
